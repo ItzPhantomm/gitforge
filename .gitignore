@@ -20,7 +20,6 @@ Thumbs.db
 *~
 
 # Go
-go.sum
 go.work
 vendor/
 

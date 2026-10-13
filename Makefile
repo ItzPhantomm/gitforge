@@ -38,13 +38,13 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: build
-build: ## Build for current platform
+build: deps ## Build for current platform
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)
 	@echo "Built $(BUILD_DIR)/$(BINARY_NAME)"
 
 .PHONY: build-all
-build-all: ## Build for all platforms
+build-all: deps ## Build for all platforms
 	@mkdir -p $(DIST_DIR)
 	@for platform in $(PLATFORMS); do \
 		OS=$$(echo $$platform | cut -d_ -f1); \
@@ -187,7 +187,7 @@ docker-run: ## Run Docker container
 # Dependency management
 .PHONY: deps
 deps: ## Download dependencies
-	$(GO) mod download
+	@if [ ! -f go.sum ]; then $(GO) mod tidy; else $(GO) mod download; fi
 
 .PHONY: deps-graph
 deps-graph: ## Show dependency graph

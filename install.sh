@@ -4,7 +4,7 @@
 
 set -e
 
-REPO="gitforge/gitforge"
+REPO="${REPO:-${GITHUB_REPOSITORY:-ItzPhantomm/gitforge}}"
 BINARY_NAME="gitforge"
 INSTALL_DIR="/usr/local/bin"
 
@@ -52,9 +52,16 @@ detect_platform() {
 # Get latest release version
 get_latest_version() {
     info "Fetching latest release..."
-    VERSION=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+    local auth_header=()
+    if [ -n "$GITHUB_TOKEN" ]; then
+        auth_header=(-H "Authorization: token $GITHUB_TOKEN")
+    elif [ -n "$GH_TOKEN" ]; then
+        auth_header=(-H "Authorization: token $GH_TOKEN")
+    fi
+
+    VERSION=$(curl -sL "${auth_header[@]}" "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
     if [ -z "$VERSION" ]; then
-        warning "Could not fetch latest version, using 'latest'"
+        warning "Could not fetch latest version from API, using 'latest'"
         VERSION="latest"
     else
         info "Latest version: $VERSION"
@@ -63,6 +70,13 @@ get_latest_version() {
 
 # Download and install
 install_binary() {
+    local auth_header=()
+    if [ -n "$GITHUB_TOKEN" ]; then
+        auth_header=(-H "Authorization: token $GITHUB_TOKEN")
+    elif [ -n "$GH_TOKEN" ]; then
+        auth_header=(-H "Authorization: token $GH_TOKEN")
+    fi
+
     local url="https://github.com/$REPO/releases/download/$VERSION/${BINARY_NAME}_${PLATFORM}.tar.gz"
     
     if [ "$VERSION" = "latest" ]; then
@@ -75,20 +89,47 @@ install_binary() {
     TMP_DIR=$(mktemp -d)
     trap "rm -rf $TMP_DIR" EXIT
 
-    if ! curl -L -o "$TMP_DIR/${BINARY_NAME}.tar.gz" "$url"; then
-        error "Failed to download. Please check if release exists for $PLATFORM"
+    if ! curl -fL "${auth_header[@]}" -o "$TMP_DIR/${BINARY_NAME}.tar.gz" "$url"; then
+        error "Failed to download $url. Please check if release exists for $PLATFORM"
     fi
 
     info "Extracting..."
     tar -xzf "$TMP_DIR/${BINARY_NAME}.tar.gz" -C "$TMP_DIR"
 
+    # Find the extracted binary (archive may contain gitforge, gitforge_<platform>, or gitforge_<platform>.exe)
+    local EXTRACTED_BIN=""
+    if [ -f "$TMP_DIR/$BINARY_NAME" ]; then
+        EXTRACTED_BIN="$TMP_DIR/$BINARY_NAME"
+    elif [ -f "$TMP_DIR/${BINARY_NAME}_${PLATFORM}" ]; then
+        EXTRACTED_BIN="$TMP_DIR/${BINARY_NAME}_${PLATFORM}"
+    elif [ -f "$TMP_DIR/${BINARY_NAME}_${PLATFORM}.exe" ]; then
+        EXTRACTED_BIN="$TMP_DIR/${BINARY_NAME}_${PLATFORM}.exe"
+    else
+        EXTRACTED_BIN=$(find "$TMP_DIR" -type f -name "${BINARY_NAME}*" ! -name "*.tar.gz" | head -1)
+    fi
+
+    if [ -z "$EXTRACTED_BIN" ] || [ ! -f "$EXTRACTED_BIN" ]; then
+        error "Could not find binary in extracted archive"
+    fi
+
     info "Installing to $INSTALL_DIR..."
+    local SUDO_CMD=""
+    if [ "$OS" != "termux" ] && [ "$(id -u)" -ne 0 ]; then
+        if command -v sudo >/dev/null 2>&1; then
+            SUDO_CMD="sudo"
+        else
+            error "Root privileges or sudo required to install to $INSTALL_DIR"
+        fi
+    fi
+
     if [ "$OS" = "termux" ]; then
         mkdir -p "$INSTALL_DIR"
-        mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/"
+        mv "$EXTRACTED_BIN" "$INSTALL_DIR/$BINARY_NAME"
+        chmod +x "$INSTALL_DIR/$BINARY_NAME"
     else
-        sudo mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/"
-        sudo chmod +x "$INSTALL_DIR/$BINARY_NAME"
+        $SUDO_CMD mkdir -p "$INSTALL_DIR"
+        $SUDO_CMD mv "$EXTRACTED_BIN" "$INSTALL_DIR/$BINARY_NAME"
+        $SUDO_CMD chmod +x "$INSTALL_DIR/$BINARY_NAME"
     fi
 
     success "Installed $BINARY_NAME to $INSTALL_DIR"
@@ -114,27 +155,37 @@ verify_install() {
 # Install shell completions
 install_completions() {
     info "Installing shell completions..."
+    local SUDO_CMD=""
+    if [ "$OS" != "termux" ] && [ "$(id -u)" -ne 0 ]; then
+        command -v sudo >/dev/null 2>&1 && SUDO_CMD="sudo"
+    fi
+
     $BINARY_NAME completion bash >/dev/null 2>&1 && {
         if [ "$OS" = "termux" ]; then
             mkdir -p "$HOME/.bash_completion.d"
-            $BINARY_NAME completion bash > "$HOME/.bash_completion.d/gitforge"
-            echo "source ~/.bash_completion.d/gitforge" >> ~/.bashrc
+            $BINARY_NAME completion bash > "$HOME/.bash_completion.d/gitforge" 2>/dev/null || true
+            echo "source ~/.bash_completion.d/gitforge" >> ~/.bashrc 2>/dev/null || true
         else
-            sudo $BINARY_NAME completion bash | sudo tee /etc/bash_completion.d/gitforge >/dev/null
+            if [ -d "/etc/bash_completion.d" ]; then
+                $SUDO_CMD $BINARY_NAME completion bash | $SUDO_CMD tee /etc/bash_completion.d/gitforge >/dev/null 2>&1 || true
+            fi
         fi
     }
     $BINARY_NAME completion zsh >/dev/null 2>&1 && {
         if [ "$OS" = "termux" ]; then
             mkdir -p "$HOME/.zsh/completions"
-            $BINARY_NAME completion zsh > "$HOME/.zsh/completions/_gitforge"
-            echo 'fpath+=~/.zsh/completions' >> ~/.zshrc
+            $BINARY_NAME completion zsh > "$HOME/.zsh/completions/_gitforge" 2>/dev/null || true
+            echo 'fpath+=~/.zsh/completions' >> ~/.zshrc 2>/dev/null || true
         else
-            sudo $BINARY_NAME completion zsh | sudo tee /usr/local/share/zsh/site-functions/_gitforge >/dev/null
+            if [ -d "/usr/local/share/zsh/site-functions" ]; then
+                $SUDO_CMD $BINARY_NAME completion zsh | $SUDO_CMD tee /usr/local/share/zsh/site-functions/_gitforge >/dev/null 2>&1 || true
+            fi
         fi
     }
     $BINARY_NAME completion fish >/dev/null 2>&1 && {
-        mkdir -p ~/.config/fish/completions
-        $BINARY_NAME completion fish > ~/.config/fish/completions/gitforge.fish
+        if [ -d "$HOME/.config/fish/completions" ] || mkdir -p ~/.config/fish/completions 2>/dev/null; then
+            $BINARY_NAME completion fish > ~/.config/fish/completions/gitforge.fish 2>/dev/null || true
+        fi
     }
     success "Shell completions installed"
 }
