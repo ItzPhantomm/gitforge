@@ -75,7 +75,7 @@ jobs:
                 {"name": "🤖 Local AI", "value": "Phi-3, CodeLlama via WebAssembly", "inline": true},
                 {"name": "🔌 Plugins", "value": "WASM + Go, hot-reload, capability-based security", "inline": true},
                 {"name": "📦 Platforms", "value": "Linux, macOS, Windows, Termux, FreeBSD, OpenBSD", "inline": true},
-                {"name": "🛠 Install", "value": "\`curl -fsSL https://gitforge.dev/install.sh | bash\`", "inline": false}
+                {"name": "🛠 Install", "value": "\`curl -fsSL https://raw.githubusercontent.com/ItzPhantomm/gitforge/master/install.sh | bash\`", "inline": false}
               ],
               "footer": {"text": "Built with Go, Bubble Tea, and aio-stack"},
               "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"

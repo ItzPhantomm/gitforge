@@ -73,7 +73,7 @@ release:
 
     ### Universal Installer (Linux/macOS/WSL/Termux)
     ```bash
-    curl -fsSL https://gitforge.dev/install.sh | bash
+    curl -fsSL https://raw.githubusercontent.com/ItzPhantomm/gitforge/master/install.sh | bash
     ```
 
     ### Package Managers

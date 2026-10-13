@@ -15,15 +15,10 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 
 ### How to Report
 
-**Preferred: GitHub Security Advisories (Private)**
+**GitHub Security Advisories (Private)**
 1. Go to the [Security tab](https://github.com/phantom1785322-hub/gitforge/security)
 2. Click "Report a vulnerability"
 3. Fill out the form with details
-
-**Alternative: Email**
-- Email: security@gitforge.dev
-- Subject: [SECURITY] Vulnerability Report
-- Include: Description, reproduction steps, impact, suggested fix
 
 ### What to Include
 - Description of the vulnerability
@@ -56,11 +51,8 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 # Check for updates
 gitforge version
 
-# Update via package manager
-brew upgrade gitforge        # macOS/Linux
-scoop update gitforge        # Windows
-# Or re-run installer
-curl -fsSL https://gitforge.dev/install.sh | bash
+# Re-run installer
+curl -fsSL https://raw.githubusercontent.com/ItzPhantomm/gitforge/master/install.sh | bash
 ```
 
 ### Secure Configuration
@@ -98,9 +90,8 @@ curl -fsSL https://gitforge.dev/install.sh | bash
 
 ## Security Contacts
 
-- **Primary**: security@gitforge.dev
-- **Maintainer**: @phantom1785322-hub
-- **PGP Key**: Available on [GitHub profile](https://github.com/phantom1785322-hub.gpg)
+- **Maintainer**: @phantom1785322-hub / @ItzPhantomm
+- **GitHub Security**: [Private Vulnerability Reporting](https://github.com/phantom1785322-hub/gitforge/security)
 
 ## Bug Bounty
 

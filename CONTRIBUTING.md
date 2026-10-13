@@ -20,7 +20,7 @@ We welcome contributions from everyone — whether it's fixing a typo, adding a 
 
 ## Code of Conduct
 
-This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold this code. Please report unacceptable behavior to conduct@gitforge.dev.
+This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold this code. Please report unacceptable behavior through GitHub Private Security Advisory or maintainer contacts.
 
 ---
 
@@ -379,12 +379,9 @@ Follow [Keep a Changelog](https://keepachangelog.com/):
 ### Communication Channels
 - **GitHub Discussions** — Questions, ideas, showcase
 - **GitHub Issues** — Bugs, feature requests
-- **Discord** — Real-time chat (invite in README)
-- **Twitter** — [@gitforge](https://twitter.com/gitforge)
 
 ### Getting Help
 - Run `gitforge doctor` for diagnostics
-- Check [documentation](https://gitforge.dev/docs)
 - Search [existing issues](https://github.com/phantom1785322-hub/gitforge/issues)
 - Ask in [Discussions](https://github.com/phantom1785322-hub/gitforge/discussions)
 
@@ -404,7 +401,7 @@ By contributing, you agree that your contributions will be licensed under the [M
 
 ## Questions?
 
-Open a [Discussion](https://github.com/phantom1785322-hub/gitforge/discussions) or ask in Discord!
+Open a [Discussion](https://github.com/phantom1785322-hub/gitforge/discussions) or create an issue!
 
 ---
 

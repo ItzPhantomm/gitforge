@@ -59,6 +59,10 @@ build-all: deps ## Build for all platforms
 
 .PHONY: test
 test: ## Run tests
+	$(GO) test -v -count=1 ./...
+
+.PHONY: test-race
+test-race: ## Run tests with race detector
 	$(GO) test -v -race -count=1 ./...
 
 .PHONY: test-short
@@ -73,7 +77,7 @@ lint: ## Run linter
 .PHONY: fmt
 fmt: ## Format code
 	$(GO) fmt ./...
-	goimports -w .
+	@which goimports >/dev/null 2>&1 && goimports -w . || true
 
 .PHONY: vet
 vet: ## Run go vet
@@ -120,6 +124,9 @@ install-tools: ## Install development tools
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install golang.org/x/tools/cmd/goimports@latest
 	go install github.com/goreleaser/goreleaser@latest
+
+.PHONY: dev-setup
+dev-setup: install-tools deps ## Setup development environment
 
 .PHONY: check
 check: fmt vet lint test-short ## Run all checks

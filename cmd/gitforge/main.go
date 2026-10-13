@@ -12,10 +12,11 @@ import (
 var version = "0.1.0-dev"
 
 func main() {
+	commands.Version = version
 	rootCmd := &cobra.Command{
-		Use:     "gitforge",
-		Short:   "GitForge - A beautiful, powerful Git client for terminal and web",
-		Long:    `GitForge is a beautiful, powerful Git client that works in your terminal and browser.
+		Use:   "gitforge",
+		Short: "GitForge - A beautiful, powerful Git client for terminal and web",
+		Long: `GitForge is a beautiful, powerful Git client that works in your terminal and browser.
 It provides visual commit graphs, interactive staging, conflict resolution,
 AI-assisted commits, and seamless GitHub/GitLab integration.`,
 		Version: version,

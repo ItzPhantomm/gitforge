@@ -1,13 +1,20 @@
 package commands
 
 import (
+	"context"
 	"fmt"
+	"os/exec"
+	"runtime"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/gitforge/gitforge/internal/git"
 	"github.com/spf13/cobra"
 )
+
+// Version holds the current GitForge version.
+var Version = "0.1.0-dev"
 
 // NewTUICmd launches the GitForge terminal UI
 func NewTUICmd() *cobra.Command {
@@ -41,18 +48,18 @@ type Model struct {
 
 // SidebarModel handles the sidebar (repos, branches, remotes)
 type SidebarModel struct {
-	items     []string
-	selected  int
-	sections  []Section
-	focused   bool
+	items    []string
+	selected int
+	sections []Section
+	focused  bool
 }
 
 // Section represents a sidebar section
 type Section struct {
-	name   string
-	items  []string
-	start  int
-	end    int
+	name  string
+	items []string
+	start int
+	end   int
 }
 
 // MainModel handles the main content area (commit graph, diff)
@@ -71,39 +78,39 @@ type DetailModel struct {
 // Styles
 var (
 	sidebarStyle = lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("62")).
-		Padding(1, 2).
-		Width(30)
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("62")).
+			Padding(1, 2).
+			Width(30)
 
 	mainStyle = lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("62")).
-		Padding(1, 2)
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("62")).
+			Padding(1, 2)
 
 	detailStyle = lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("62")).
-		Padding(1, 2).
-		Width(40)
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("62")).
+			Padding(1, 2).
+			Width(40)
 
 	focusedBorder = lipgloss.NewStyle().
-		BorderForeground(lipgloss.Color("205"))
+			BorderForeground(lipgloss.Color("205"))
 
 	titleStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("205"))
+			Bold(true).
+			Foreground(lipgloss.Color("205"))
 
 	selectedItemStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("205")).
-		Bold(true)
+				Foreground(lipgloss.Color("205")).
+				Bold(true)
 
 	itemStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
+			Foreground(lipgloss.Color("252"))
 
 	helpStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-		Italic(true)
+			Foreground(lipgloss.Color("241")).
+			Italic(true)
 )
 
 func runTUI() error {
@@ -217,7 +224,11 @@ func NewMainModel(commits []git.Commit) MainModel {
 			if i >= 10 {
 				break
 			}
-			content += fmt.Sprintf("  %s %s\n", c.Hash[:7], c.Subject)
+			hash := c.Hash
+			if len(hash) > 7 {
+				hash = hash[:7]
+			}
+			content += fmt.Sprintf("  %s %s\n", hash, c.Subject)
 		}
 	} else {
 		content += "No commits yet. Make your first commit!\n"
@@ -239,6 +250,15 @@ func NewDetailModel() DetailModel {
 	}
 }
 
+type dataRefreshedMsg struct {
+	status   git.Status
+	branches []git.Branch
+	remotes  []git.Remote
+	commits  []git.Commit
+}
+
+type actionResultMsg string
+
 // Init implements tea.Model
 func (m Model) Init() tea.Cmd {
 	return nil
@@ -250,6 +270,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		return m, nil
+
+	case dataRefreshedMsg:
+		m.status = msg.status
+		m.branches = msg.branches
+		m.remotes = msg.remotes
+		m.commits = msg.commits
+		if m.repo != nil {
+			m.sidebar = NewSidebarModel(m.repo.Workdir(), msg.branches, msg.remotes)
+		}
+		m.main = NewMainModel(msg.commits)
+		return m, nil
+
+	case actionResultMsg:
+		m.detail.content = string(msg)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -287,28 +322,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "r":
-			// Refresh
 			return m, m.refreshData()
 
 		case "s":
-			// Stage all
 			return m, m.stageAll()
 
 		case "c":
-			// Commit
 			return m, m.commit()
 
 		case "p":
-			// Push
 			return m, m.push()
 
 		case "P":
-			// Pull
 			return m, m.pull()
 		}
 
 	case tea.MouseMsg:
-		// Handle mouse events
 		return m, nil
 	}
 
@@ -327,66 +356,64 @@ func (m *Model) handleSidebarSelect() {
 		return
 	}
 
-	switch {
-	case item == "Stage All":
-		m.main.content = "Staging all changes...\n"
-		m.detail.content = "This will stage all modified and untracked files."
-	case item == "Commit":
-		m.main.content = "Opening commit editor...\n"
-		m.detail.content = "Enter commit message in the editor."
-	case item == "Push":
-		m.main.content = "Pushing to remote...\n"
-		m.detail.content = "Will push current branch to upstream."
-	case item == "Pull":
-		m.main.content = "Pulling from remote...\n"
-		m.detail.content = "Will fetch and merge from upstream."
-	case item == "Fetch":
-		m.main.content = "Fetching from remotes...\n"
-		m.detail.content = "Will fetch all remotes."
-	case item == "Stash":
-		m.main.content = "Stashing changes...\n"
-		m.detail.content = "Will stash current changes."
+	switch item {
+	case "Stage All":
+		m.detail.content = "Press 's' to stage all modified files."
+	case "Commit":
+		m.detail.content = "Run 'gitforge commit -m <msg>' in terminal to commit."
+	case "Push":
+		m.detail.content = "Press 'p' to push to remote."
+	case "Pull":
+		m.detail.content = "Press 'P' to pull from remote."
+	case "Fetch":
+		m.detail.content = "Press 'r' to refresh / fetch."
+	case "Stash":
+		m.detail.content = "Run 'gitforge stash' in terminal to stash changes."
 	default:
-		m.detail.content = fmt.Sprintf("Selected: %s\n\nPress Enter for actions.", item)
+		m.detail.content = fmt.Sprintf("Selected: %s", item)
 	}
 }
 
 func (m *Model) refreshData() tea.Cmd {
 	return func() tea.Msg {
-		if m.repo != nil {
-			status, _ := m.repo.Status()
-			branches, _ := m.repo.Branches()
-			remotes, _ := m.repo.Remotes()
-			commits, _ := m.repo.Log(&git.LogOptions{Limit: 20})
-
-			m.status = status
-			m.branches = branches
-			m.remotes = remotes
-			m.commits = commits
-
-			m.sidebar = NewSidebarModel(m.repo.Workdir(), branches, remotes)
-			m.main = NewMainModel(commits)
+		if m.repo == nil {
+			return nil
 		}
-		return nil
+		status, _ := m.repo.Status()
+		branches, _ := m.repo.Branches()
+		remotes, _ := m.repo.Remotes()
+		commits, _ := m.repo.Log(&git.LogOptions{Limit: 20})
+		return dataRefreshedMsg{
+			status:   status,
+			branches: branches,
+			remotes:  remotes,
+			commits:  commits,
+		}
 	}
 }
 
 func (m *Model) stageAll() tea.Cmd {
 	return func() tea.Msg {
-		if m.repo != nil {
-			_ = m.repo.Add(".")
-			status, _ := m.repo.Status()
-			m.status = status
-			m.detail.content = fmt.Sprintf("Staged %d files", len(status.Staged))
+		if m.repo == nil {
+			return actionResultMsg("No repository open")
 		}
-		return nil
+		_ = m.repo.Add(".")
+		status, _ := m.repo.Status()
+		branches, _ := m.repo.Branches()
+		remotes, _ := m.repo.Remotes()
+		commits, _ := m.repo.Log(&git.LogOptions{Limit: 20})
+		return dataRefreshedMsg{
+			status:   status,
+			branches: branches,
+			remotes:  remotes,
+			commits:  commits,
+		}
 	}
 }
 
 func (m *Model) commit() tea.Cmd {
 	return func() tea.Msg {
-		m.detail.content = "Opening editor for commit message..."
-		return nil
+		return actionResultMsg("Run 'gitforge commit -m <msg>' to commit.")
 	}
 }
 
@@ -395,12 +422,11 @@ func (m *Model) push() tea.Cmd {
 		if m.repo != nil && len(m.remotes) > 0 {
 			err := m.repo.Push(m.remotes[0].Name, []string{})
 			if err != nil {
-				m.detail.content = fmt.Sprintf("Push failed: %v", err)
-			} else {
-				m.detail.content = "Push successful!"
+				return actionResultMsg(fmt.Sprintf("Push failed: %v", err))
 			}
+			return actionResultMsg("Push successful!")
 		}
-		return nil
+		return actionResultMsg("No remote configured to push to")
 	}
 }
 
@@ -409,12 +435,11 @@ func (m *Model) pull() tea.Cmd {
 		if m.repo != nil && len(m.remotes) > 0 {
 			err := m.repo.Pull(m.remotes[0].Name, "")
 			if err != nil {
-				m.detail.content = fmt.Sprintf("Pull failed: %v", err)
-			} else {
-				m.detail.content = "Pull successful!"
+				return actionResultMsg(fmt.Sprintf("Pull failed: %v", err))
 			}
+			return actionResultMsg("Pull successful!")
 		}
-		return nil
+		return actionResultMsg("No remote configured to pull from")
 	}
 }
 
@@ -428,10 +453,9 @@ func (m Model) View() string {
 		return "Loading..."
 	}
 
-	// Calculate panel widths
 	sidebarWidth := 30
 	detailWidth := 40
-	mainWidth := m.width - sidebarWidth - detailWidth - 6 // borders and padding
+	mainWidth := m.width - sidebarWidth - detailWidth - 6
 
 	if mainWidth < 40 {
 		mainWidth = 40
@@ -459,7 +483,6 @@ func (m Model) View() string {
 	main := mainStyle.Render(m.main.View())
 	detail := detailStyle.Render(m.detail.View())
 
-	// Help bar
 	help := helpStyle.Render("Tab/Shift+Tab: Switch panels  •  ↑/↓: Navigate  •  Enter: Select  •  r: Refresh  •  s: Stage all  •  c: Commit  •  p: Push  •  P: Pull  •  q: Quit")
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main, detail) + "\n" + help
@@ -507,15 +530,16 @@ func (d DetailModel) View() string {
 	return d.content
 }
 
+// Subcommands
+
 func NewWebCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "web",
 		Short: "Start the GitForge web UI server",
 		Long:  `Start the GitForge web UI server for browser-based repository management.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("🌐 Starting GitForge Web UI...")
-			fmt.Println("Web UI will be available at http://localhost:8080")
-			fmt.Println("(Web UI implementation coming soon)")
+			fmt.Println("🌐 GitForge Web UI is currently in development.")
+			fmt.Println("Use 'gitforge tui' to launch the interactive terminal interface.")
 			return nil
 		},
 	}
@@ -525,6 +549,8 @@ func NewWebCmd() *cobra.Command {
 }
 
 func NewInitCmd() *cobra.Command {
+	var bare bool
+
 	cmd := &cobra.Command{
 		Use:   "init [path]",
 		Short: "Initialize a new Git repository",
@@ -535,19 +561,22 @@ func NewInitCmd() *cobra.Command {
 			if len(args) > 0 {
 				path = args[0]
 			}
-			fmt.Printf("📁 Initializing repository at %s...\n", path)
-			fmt.Println("✅ Repository initialized with GitForge defaults!")
-			fmt.Println("   - Default branch: main")
-			fmt.Println("   - Auto-setup remote on push")
-			fmt.Println("   - User config set to GitForge User")
+			repo, err := git.InitRepo(path, bare)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("📁 Initialized Git repository at %s\n", repo.Workdir())
 			return nil
 		},
 	}
-	cmd.Flags().Bool("bare", false, "Create a bare repository")
+	cmd.Flags().BoolVar(&bare, "bare", false, "Create a bare repository")
 	return cmd
 }
 
 func NewCloneCmd() *cobra.Command {
+	var branch string
+	var depth int
+
 	cmd := &cobra.Command{
 		Use:   "clone <url> [path]",
 		Short: "Clone a repository",
@@ -555,231 +584,582 @@ func NewCloneCmd() *cobra.Command {
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			url := args[0]
+			path := ""
 			if len(args) > 1 {
-				_ = args[1]
+				path = args[1]
+			} else {
+				parts := strings.Split(strings.TrimSuffix(url, ".git"), "/")
+				path = parts[len(parts)-1]
 			}
-			fmt.Printf("📥 Cloning %s...\n", url)
-			fmt.Println("✅ Repository cloned successfully!")
+			fmt.Printf("📥 Cloning %s into %s...\n", url, path)
+			opts := &git.CloneOptions{
+				Branch: branch,
+				Depth:  depth,
+			}
+			repo, err := git.CloneRepo(context.Background(), url, path, opts)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("✅ Repository cloned successfully to %s\n", repo.Workdir())
 			return nil
 		},
 	}
-	cmd.Flags().String("branch", "", "Branch to checkout")
-	cmd.Flags().Int("depth", 0, "Shallow clone depth")
+	cmd.Flags().StringVar(&branch, "branch", "", "Branch to checkout")
+	cmd.Flags().IntVar(&depth, "depth", 0, "Shallow clone depth")
 	return cmd
 }
 
 func NewStatusCmd() *cobra.Command {
+	var short bool
+	var porcelain bool
+
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show repository status",
 		Long:  `Show the working tree status with staged, unstaged, and untracked files.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			repo, err := git.OpenRepo(".")
+			if err != nil {
+				return err
+			}
+
+			if porcelain {
+				out, err := repo.StatusRaw(true)
+				if err != nil {
+					return err
+				}
+				fmt.Print(out)
+				return nil
+			}
+
+			status, err := repo.Status()
+			if err != nil {
+				return err
+			}
+
+			branch, _ := repo.Branch()
+			if short {
+				for _, f := range status.Staged {
+					fmt.Printf("M  %s\n", f)
+				}
+				for _, f := range status.Unstaged {
+					fmt.Printf(" M %s\n", f)
+				}
+				for _, f := range status.Untracked {
+					fmt.Printf("?? %s\n", f)
+				}
+				for _, f := range status.Conflicted {
+					fmt.Printf("UU %s\n", f)
+				}
+				return nil
+			}
+
 			fmt.Println("📊 Repository Status")
 			fmt.Println("━━━━━━━━━━━━━━━━━━━")
-			fmt.Println("On branch main")
-			fmt.Println("Your branch is up to date with 'origin/main'.")
-			fmt.Println()
-			fmt.Println("Changes to be committed:")
-			fmt.Println("  (use \"gitforge restore --staged <file>...\" to unstage)")
-			fmt.Println("    modified:   src/main.go")
-			fmt.Println("    new file:   README.md")
-			fmt.Println()
-			fmt.Println("Changes not staged for commit:")
-			fmt.Println("  (use \"gitforge add <file>...\" to update what will be committed)")
-			fmt.Println("    modified:   go.mod")
-			fmt.Println()
-			fmt.Println("Untracked files:")
-			fmt.Println("  (use \"gitforge add <file>...\" to include in what will be committed)")
-			fmt.Println("    temp.txt")
+			if branch != "" {
+				fmt.Printf("On branch %s\n\n", branch)
+			}
+
+			if status.IsClean() {
+				fmt.Println("nothing to commit, working tree clean")
+				return nil
+			}
+
+			if len(status.Staged) > 0 {
+				fmt.Println("Changes to be committed:")
+				fmt.Println("  (use \"git restore --staged <file>...\" to unstage)")
+				for _, f := range status.Staged {
+					fmt.Printf("    \033[32mmodified:   %s\033[0m\n", f)
+				}
+				fmt.Println()
+			}
+
+			if len(status.Unstaged) > 0 {
+				fmt.Println("Changes not staged for commit:")
+				fmt.Println("  (use \"git add <file>...\" to update what will be committed)")
+				for _, f := range status.Unstaged {
+					fmt.Printf("    \033[31mmodified:   %s\033[0m\n", f)
+				}
+				fmt.Println()
+			}
+
+			if len(status.Untracked) > 0 {
+				fmt.Println("Untracked files:")
+				fmt.Println("  (use \"git add <file>...\" to include in what will be committed)")
+				for _, f := range status.Untracked {
+					fmt.Printf("    \033[31m%s\033[0m\n", f)
+				}
+				fmt.Println()
+			}
+
+			if len(status.Conflicted) > 0 {
+				fmt.Println("Unmerged paths:")
+				for _, f := range status.Conflicted {
+					fmt.Printf("    \033[35mboth modified:   %s\033[0m\n", f)
+				}
+				fmt.Println()
+			}
+
 			return nil
 		},
 	}
-	cmd.Flags().BoolP("short", "s", false, "Short format")
-	cmd.Flags().Bool("porcelain", false, "Machine-readable output")
+	cmd.Flags().BoolVarP(&short, "short", "s", false, "Short format")
+	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Machine-readable output")
 	return cmd
 }
 
 func NewLogCmd() *cobra.Command {
+	var maxCount int
+	var oneline bool
+	var author string
+	var grep string
+
 	cmd := &cobra.Command{
 		Use:   "log",
 		Short: "Show commit history",
-		Long:  `Show the commit history with beautiful formatting.`,
+		Long:  `Show the commit history with clean formatting.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			repo, err := git.OpenRepo(".")
+			if err != nil {
+				return err
+			}
+
+			opts := &git.LogOptions{
+				Limit:  maxCount,
+				Author: author,
+				Grep:   grep,
+			}
+			commits, err := repo.Log(opts)
+			if err != nil {
+				return err
+			}
+
+			if len(commits) == 0 {
+				fmt.Println("No commits yet.")
+				return nil
+			}
+
+			if oneline {
+				for _, c := range commits {
+					hash := c.Hash
+					if len(hash) > 7 {
+						hash = hash[:7]
+					}
+					fmt.Printf("\033[33m%s\033[0m %s\n", hash, c.Subject)
+				}
+				return nil
+			}
+
 			fmt.Println("📜 Commit History")
 			fmt.Println("━━━━━━━━━━━━━━━")
-			fmt.Println("* a1b2c3d (HEAD -> main, origin/main) Add amazing feature")
-			fmt.Println("| Author: GitForge User <user@gitforge.local>")
-			fmt.Println("| Date:   Mon Jul 27 10:30:00 2025 +0000")
-			fmt.Println("|")
-			fmt.Println("* e4f5g6h Fix critical bug")
-			fmt.Println("| Author: GitForge User <user@gitforge.local>")
-			fmt.Println("| Date:   Mon Jul 26 15:45:00 2025 +0000")
-			fmt.Println("|")
-			fmt.Println("* h7i8j9k Initial commit")
-			fmt.Println("  Author: GitForge User <user@gitforge.local>")
-			fmt.Println("  Date:   Mon Jul 25 09:00:00 2025 +0000")
+			for _, c := range commits {
+				hash := c.Hash
+				if len(hash) > 7 {
+					hash = hash[:7]
+				}
+				fmt.Printf("* \033[33m%s\033[0m %s\n", hash, c.Subject)
+				fmt.Printf("| Author: %s <%s>\n", c.Author.Name, c.Author.Email)
+				fmt.Printf("| Date:   %s\n", c.Date.Format("Mon Jan 02 15:04:05 2006 -0700"))
+				if c.Body != "" {
+					fmt.Printf("|\n|   %s\n", strings.ReplaceAll(c.Body, "\n", "\n|   "))
+				}
+				fmt.Println("|")
+			}
 			return nil
 		},
 	}
-	cmd.Flags().IntP("max-count", "n", 0, "Limit number of commits")
-	cmd.Flags().BoolP("oneline", "", false, "One line per commit")
-	cmd.Flags().Bool("graph", false, "Show ASCII graph")
-	cmd.Flags().String("author", "", "Filter by author")
-	cmd.Flags().String("grep", "", "Filter by commit message")
+	cmd.Flags().IntVarP(&maxCount, "max-count", "n", 10, "Limit number of commits")
+	cmd.Flags().BoolVar(&oneline, "oneline", false, "One line per commit")
+	cmd.Flags().StringVar(&author, "author", "", "Filter by author")
+	cmd.Flags().StringVar(&grep, "grep", "", "Filter by commit message")
 	return cmd
 }
 
 func NewBranchCmd() *cobra.Command {
+	var showAll bool
+	var deleteBranch bool
+	var forceDelete bool
+
 	cmd := &cobra.Command{
-		Use:   "branch",
+		Use:   "branch [name]",
 		Short: "Manage branches",
 		Long:  `List, create, or delete branches.`,
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			repo, err := git.OpenRepo(".")
+			if err != nil {
+				return err
+			}
+
+			if deleteBranch {
+				if len(args) == 0 {
+					return fmt.Errorf("branch name required to delete")
+				}
+				if err := repo.DeleteBranch(args[0], forceDelete); err != nil {
+					return err
+				}
+				fmt.Printf("Deleted branch %s\n", args[0])
+				return nil
+			}
+
+			if len(args) == 1 {
+				if err := repo.CreateBranch(args[0], ""); err != nil {
+					return err
+				}
+				fmt.Printf("Created branch %s\n", args[0])
+				return nil
+			}
+
+			branches, err := repo.Branches()
+			if err != nil {
+				return err
+			}
+
 			fmt.Println("🌿 Branches")
 			fmt.Println("━━━━━━━━━━")
-			fmt.Println("* main")
-			fmt.Println("  feature/awesome-feature")
-			fmt.Println("  bugfix/critical-fix")
-			fmt.Println("  release/v1.0.0")
+			for _, b := range branches {
+				prefix := "  "
+				if b.IsCurrent {
+					prefix = "* \033[32m"
+					fmt.Printf("%s%s\033[0m", prefix, b.Name)
+				} else {
+					fmt.Printf("%s%s", prefix, b.Name)
+				}
+				if b.Upstream != "" {
+					fmt.Printf(" -> %s", b.Upstream)
+				}
+				fmt.Println()
+			}
+
+			if showAll {
+				remotes, err := repo.RemoteBranches()
+				if err == nil && len(remotes) > 0 {
+					fmt.Println("\nRemote branches:")
+					for _, rb := range remotes {
+						fmt.Printf("  \033[31m%s\033[0m\n", rb.Name)
+					}
+				}
+			}
+
 			return nil
 		},
 	}
-	cmd.Flags().Bool("all", false, "Show all branches (including remote)")
-	cmd.Flags().Bool("delete", false, "Delete branch")
-	cmd.Flags().Bool("force", false, "Force delete")
+	cmd.Flags().BoolVarP(&showAll, "all", "a", false, "Show all branches (including remote)")
+	cmd.Flags().BoolVarP(&deleteBranch, "delete", "d", false, "Delete branch")
+	cmd.Flags().BoolVarP(&forceDelete, "force", "D", false, "Force delete branch")
 	return cmd
 }
 
 func NewCommitCmd() *cobra.Command {
+	var message string
+	var stageAll bool
+
 	cmd := &cobra.Command{
 		Use:   "commit",
 		Short: "Create a commit",
 		Long:  `Create a new commit with staged changes.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			message, _ := cmd.Flags().GetString("message")
-			if message == "" {
-				fmt.Println("💡 Opening editor for commit message...")
-				fmt.Println("📝 Commit created: a1b2c3d Add amazing feature")
-				return nil
+			repo, err := git.OpenRepo(".")
+			if err != nil {
+				return err
 			}
-			fmt.Printf("📝 Commit created: %s\n", message)
+
+			if message == "" {
+				return fmt.Errorf("commit message required (-m)")
+			}
+
+			if stageAll {
+				if err := repo.Add("."); err != nil {
+					return fmt.Errorf("staging failed: %w", err)
+				}
+			}
+
+			hash, err := repo.Commit(message, nil)
+			if err != nil {
+				return err
+			}
+
+			if len(hash) > 7 {
+				hash = hash[:7]
+			}
+			fmt.Printf("📝 Commit created: %s %s\n", hash, message)
 			return nil
 		},
 	}
-	cmd.Flags().StringP("message", "m", "", "Commit message")
-	cmd.Flags().Bool("all", false, "Stage all modified files")
-	cmd.Flags().Bool("amend", false, "Amend previous commit")
-	cmd.Flags().Bool("signoff", false, "Add Signed-off-by")
+	cmd.Flags().StringVarP(&message, "message", "m", "", "Commit message")
+	cmd.Flags().BoolVarP(&stageAll, "all", "a", false, "Stage all modified files")
 	return cmd
 }
 
 func NewDiffCmd() *cobra.Command {
+	var cached bool
+	var file string
+
 	cmd := &cobra.Command{
 		Use:   "diff",
 		Short: "Show changes",
 		Long:  `Show differences between commits, working tree, and index.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			repo, err := git.OpenRepo(".")
+			if err != nil {
+				return err
+			}
+
+			diff, err := repo.Diff(&git.DiffOptions{
+				Cached: cached,
+				File:   file,
+			})
+			if err != nil {
+				return err
+			}
+
+			if strings.TrimSpace(diff.Raw) == "" {
+				return nil
+			}
+
 			fmt.Println("📝 Diff")
 			fmt.Println("━━━━━━━━")
-			fmt.Println("diff --git a/src/main.go b/src/main.go")
-			fmt.Println("index a1b2c3d..e4f5g6h 100644")
-			fmt.Println("--- a/src/main.go")
-			fmt.Println("+++ b/src/main.go")
-			fmt.Println("@@ -1,5 +1,6 @@")
-			fmt.Println(" package main")
-			fmt.Println(" ")
-			fmt.Println(" import (")
-			fmt.Println("+    \"fmt\"")
-			fmt.Println("     \"os\"")
-			fmt.Println(" )")
-			fmt.Println(" ")
-			fmt.Println(" func main() {")
-			fmt.Println("-    fmt.Println(\"Hello, World!\")")
-			fmt.Println("+    fmt.Println(\"Hello, GitForge!\")")
-			fmt.Println(" }")
+			fmt.Println(diff.Raw)
 			return nil
 		},
 	}
-	cmd.Flags().Bool("cached", false, "Show staged changes")
-	cmd.Flags().String("file", "", "Show diff for specific file")
+	cmd.Flags().BoolVar(&cached, "cached", false, "Show staged changes")
+	cmd.Flags().StringVar(&file, "file", "", "Show diff for specific file")
 	return cmd
 }
 
 func NewRemoteCmd() *cobra.Command {
+	var addRemote string
+	var removeRemote string
+
 	cmd := &cobra.Command{
 		Use:   "remote",
 		Short: "Manage remotes",
 		Long:  `Manage remote repositories.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			repo, err := git.OpenRepo(".")
+			if err != nil {
+				return err
+			}
+
+			if removeRemote != "" {
+				if err := repo.RemoveRemote(removeRemote); err != nil {
+					return err
+				}
+				fmt.Printf("Removed remote %s\n", removeRemote)
+				return nil
+			}
+
+			if addRemote != "" {
+				parts := strings.Fields(addRemote)
+				if len(parts) < 2 {
+					return fmt.Errorf("add requires '<name> <url>'")
+				}
+				if err := repo.AddRemote(parts[0], parts[1]); err != nil {
+					return err
+				}
+				fmt.Printf("Added remote %s (%s)\n", parts[0], parts[1])
+				return nil
+			}
+
+			remotes, err := repo.Remotes()
+			if err != nil {
+				return err
+			}
+
+			if len(remotes) == 0 {
+				fmt.Println("No remotes configured.")
+				return nil
+			}
+
 			fmt.Println("🔗 Remotes")
 			fmt.Println("━━━━━━━━")
-			fmt.Println("origin  https://github.com/user/repo.git (fetch)")
-			fmt.Println("origin  https://github.com/user/repo.git (push)")
+			for _, r := range remotes {
+				if r.FetchURL != "" {
+					fmt.Printf("%-10s %s (fetch)\n", r.Name, r.FetchURL)
+				}
+				if r.PushURL != "" {
+					fmt.Printf("%-10s %s (push)\n", r.Name, r.PushURL)
+				}
+			}
 			return nil
 		},
 	}
-	cmd.Flags().Bool("verbose", false, "Show URLs")
-	cmd.Flags().String("add", "", "Add remote (name url)")
-	cmd.Flags().String("remove", "", "Remove remote")
+	cmd.Flags().StringVar(&addRemote, "add", "", "Add remote (format: 'name url')")
+	cmd.Flags().StringVar(&removeRemote, "remove", "", "Remove remote by name")
 	return cmd
 }
 
 func NewStashCmd() *cobra.Command {
+	var message string
+	var listStashes bool
+	var popStash bool
+	var dropStash bool
+
 	cmd := &cobra.Command{
 		Use:   "stash",
 		Short: "Stash changes",
 		Long:  `Stash changes in a dirty working directory.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("📦 Stashing changes...")
-			fmt.Println("✅ Changes stashed successfully!")
+			repo, err := git.OpenRepo(".")
+			if err != nil {
+				return err
+			}
+
+			if popStash {
+				if err := repo.StashPop(); err != nil {
+					return err
+				}
+				fmt.Println("✅ Stash popped successfully!")
+				return nil
+			}
+
+			if dropStash {
+				if err := repo.StashDrop(0); err != nil {
+					return err
+				}
+				fmt.Println("✅ Stash dropped successfully!")
+				return nil
+			}
+
+			if listStashes {
+				stashes, err := repo.StashList()
+				if err != nil {
+					return err
+				}
+				if len(stashes) == 0 {
+					fmt.Println("No stashes found.")
+					return nil
+				}
+				for _, s := range stashes {
+					fmt.Printf("%s: %s\n", s.Index, s.Message)
+				}
+				return nil
+			}
+
+			if err := repo.Stash(message); err != nil {
+				return err
+			}
+			fmt.Println("📦 Stashed changes successfully!")
 			return nil
 		},
 	}
-	cmd.Flags().StringP("message", "m", "", "Stash message")
-	cmd.Flags().Bool("list", false, "List stashes")
-	cmd.Flags().Bool("pop", false, "Pop latest stash")
-	cmd.Flags().Bool("drop", false, "Drop stash")
+	cmd.Flags().StringVarP(&message, "message", "m", "", "Stash message")
+	cmd.Flags().BoolVar(&listStashes, "list", false, "List stashes")
+	cmd.Flags().BoolVar(&popStash, "pop", false, "Pop latest stash")
+	cmd.Flags().BoolVar(&dropStash, "drop", false, "Drop latest stash")
 	return cmd
 }
 
 func NewTagCmd() *cobra.Command {
+	var message string
+	var deleteTag string
+
 	cmd := &cobra.Command{
-		Use:   "tag",
+		Use:   "tag [name]",
 		Short: "Manage tags",
 		Long:  `Create, list, or delete tags.`,
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			repo, err := git.OpenRepo(".")
+			if err != nil {
+				return err
+			}
+
+			if deleteTag != "" {
+				if err := repo.DeleteTag(deleteTag); err != nil {
+					return err
+				}
+				fmt.Printf("Deleted tag %s\n", deleteTag)
+				return nil
+			}
+
+			if len(args) == 1 {
+				if err := repo.CreateTag(args[0], "HEAD", message); err != nil {
+					return err
+				}
+				fmt.Printf("Created tag %s\n", args[0])
+				return nil
+			}
+
+			tags, err := repo.Tags()
+			if err != nil {
+				return err
+			}
+			if len(tags) == 0 {
+				fmt.Println("No tags found.")
+				return nil
+			}
 			fmt.Println("🏷️  Tags")
 			fmt.Println("━━━━━━━")
-			fmt.Println("v1.0.0")
-			fmt.Println("v0.9.0")
-			fmt.Println("v0.1.0")
+			for _, t := range tags {
+				fmt.Println(t.Name)
+			}
 			return nil
 		},
 	}
-	cmd.Flags().StringP("message", "m", "", "Tag message")
-	cmd.Flags().Bool("delete", false, "Delete tag")
+	cmd.Flags().StringVarP(&message, "message", "m", "", "Tag message")
+	cmd.Flags().StringVarP(&deleteTag, "delete", "d", "", "Delete tag by name")
 	return cmd
 }
 
 func NewConfigCmd() *cobra.Command {
+	var getKey string
+	var setKey string
+	var listAll bool
+
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "Configure GitForge",
-		Long:  `Get or set GitForge configuration options.`,
+		Short: "Configure Git",
+		Long:  `Get or set Git repository configuration.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("⚙️  GitForge Configuration")
+			repo, err := git.OpenRepo(".")
+			if err != nil {
+				return err
+			}
+
+			if getKey != "" {
+				val, err := repo.GetConfig(getKey)
+				if err != nil {
+					return err
+				}
+				fmt.Println(val)
+				return nil
+			}
+
+			if setKey != "" {
+				parts := strings.SplitN(setKey, "=", 2)
+				if len(parts) < 2 {
+					return fmt.Errorf("set requires 'key=value'")
+				}
+				if err := repo.SetConfig(parts[0], parts[1]); err != nil {
+					return err
+				}
+				fmt.Printf("Set %s=%s\n", parts[0], parts[1])
+				return nil
+			}
+
+			cfg, err := repo.Config()
+			if err != nil {
+				return err
+			}
+			fmt.Println("⚙️  Git Configuration")
 			fmt.Println("━━━━━━━━━━━━━━━━━━━━━━")
-			fmt.Println("user.name=GitForge User")
-			fmt.Println("user.email=user@gitforge.local")
-			fmt.Println("init.defaultBranch=main")
-			fmt.Println("push.autoSetupRemote=true")
-			fmt.Println("core.autocrlf=false")
+			if cfg.UserName != "" {
+				fmt.Printf("user.name=%s\n", cfg.UserName)
+			}
+			if cfg.UserEmail != "" {
+				fmt.Printf("user.email=%s\n", cfg.UserEmail)
+			}
+			if cfg.DefaultBranch != "" {
+				fmt.Printf("init.defaultBranch=%s\n", cfg.DefaultBranch)
+			}
 			return nil
 		},
 	}
-	cmd.Flags().String("get", "", "Get config value")
-	cmd.Flags().String("set", "", "Set config value")
-	cmd.Flags().Bool("list", false, "List all config")
+	cmd.Flags().StringVar(&getKey, "get", "", "Get config value")
+	cmd.Flags().StringVar(&setKey, "set", "", "Set config value (key=val)")
+	cmd.Flags().BoolVar(&listAll, "list", false, "List config")
 	return cmd
 }
 
@@ -787,12 +1167,9 @@ func NewPluginCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "plugin",
 		Short: "Manage plugins",
-		Long:  `Install, remove, or manage GitForge plugins.`,
+		Long:  `Manage GitForge plugins.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("🔌 Plugins")
-			fmt.Println("━━━━━━━━")
-			fmt.Println("No plugins installed yet.")
-			fmt.Println("Run 'gitforge plugin install <name>' to install a plugin.")
+			fmt.Println("🔌 GitForge Plugin system is planned for a future release.")
 			return nil
 		},
 	}
@@ -810,14 +1187,48 @@ func NewDoctorCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fmt.Println("🩺 GitForge Doctor")
 			fmt.Println("━━━━━━━━━━━━━━━")
-			fmt.Println("✅ Git: Found (2.43.0)")
-			fmt.Println("✅ GitForge: 0.1.0-dev")
-			fmt.Println("✅ Config: Valid")
-			fmt.Println("✅ Remotes: Connected")
-			fmt.Println("✅ SSH Keys: Found")
-			fmt.Println("✅ GPG: Configured")
-			fmt.Println()
-			fmt.Println("All checks passed! 🎉")
+
+			// Check git binary
+			gitPath, err := exec.LookPath("git")
+			if err != nil {
+				fmt.Println("❌ Git: Not found in PATH")
+			} else {
+				out, _ := exec.Command(gitPath, "--version").Output()
+				fmt.Printf("✅ Git: %s\n", strings.TrimSpace(string(out)))
+			}
+
+			// Check GitForge version and build info
+			fmt.Printf("✅ GitForge: %s (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
+
+			// Check if inside git repo
+			repo, err := git.OpenRepo(".")
+			if err != nil {
+				fmt.Println("⚠️  Repository: Current directory is not inside a Git repository")
+			} else {
+				fmt.Printf("✅ Repository: %s\n", repo.Workdir())
+				remotes, _ := repo.Remotes()
+				if len(remotes) > 0 {
+					fmt.Printf("✅ Remotes: %d configured (%s)\n", len(remotes), remotes[0].Name)
+				} else {
+					fmt.Println("ℹ️  Remotes: None configured")
+				}
+			}
+
+			// Check SSH
+			if _, err := exec.LookPath("ssh"); err == nil {
+				fmt.Println("✅ SSH: Client available")
+			} else {
+				fmt.Println("ℹ️  SSH: No ssh client found")
+			}
+
+			// Check GPG
+			if _, err := exec.LookPath("gpg"); err == nil {
+				fmt.Println("✅ GPG: Client available")
+			} else {
+				fmt.Println("ℹ️  GPG: No gpg client found")
+			}
+
+			fmt.Println("\nAll system checks completed!")
 			return nil
 		},
 	}
@@ -831,9 +1242,9 @@ func NewVersionCmd() *cobra.Command {
 		Short: "Show version information",
 		Long:  `Display GitForge version information.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("GitForge version 0.1.0-dev")
-			fmt.Println("Built with Go 1.23")
-			fmt.Println("Platform: linux/arm64")
+			fmt.Printf("GitForge version %s\n", Version)
+			fmt.Printf("Go runtime: %s\n", runtime.Version())
+			fmt.Printf("Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 			return nil
 		},
 	}

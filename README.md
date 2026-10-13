@@ -1,21 +1,16 @@
-# GitForge
-
 <div align="center">
 
-![GitForge Logo](https://raw.githubusercontent.com/phantom1785322-hub/gitforge/main/assets/logo.png)
+# GitForge
 
-**A beautiful, powerful Git client for your terminal and browser.**
+**A beautiful, powerful Git client for your terminal.**
 
-[![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://golang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Build Status](https://github.com/phantom1785322-hub/gitforge/actions/workflows/ci.yml/badge.svg)](https://github.com/phantom1785322-hub/gitforge/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/phantom1785322-hub/gitforge)](https://github.com/phantom1785322-hub/gitforge/releases)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows%20%7C%20termux%20%7C%20bsd-lightgrey)](https://github.com/phantom1785322-hub/gitforge/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/phantom1785322-hub/gitforge)](https://goreportcard.com/report/github.com/phantom1785322-hub/gitforge)
-[![Go Reference](https://pkg.go.dev/badge/github.com/phantom1785322-hub/gitforge.svg)](https://pkg.go.dev/github.com/phantom1785322-hub/gitforge)
-[![Discord](https://img.shields.io/discord/123456789?color=5865F2&logo=discord&logoColor=white)](https://discord.gg/gitforge)
 
-[Installation](#installation) • [Features](#features) • [Usage](#usage) • [Configuration](#configuration) • [Plugins](#plugins) • [Contributing](#contributing) • [Security](#security) • [Code of Conduct](#code-of-conduct)
+[Installation](#installation) • [Features](#features) • [Usage](#usage) • [Contributing](#contributing) • [Security](#security) • [Code of Conduct](#code-of-conduct)
 
 </div>
 
@@ -115,33 +110,9 @@ gitforge plugin install gitforge/ai-review # AI code review
 
 ## Installation
 
-### Quick Install (Linux/macOS/WSL)
+### Quick Install (Linux / macOS / Termux)
 ```bash
-curl -fsSL https://gitforge.dev/install.sh | bash
-```
-
-### Package Managers
-```bash
-# Homebrew (macOS/Linux)
-brew tap phantom1785322-hub/gitforge && brew install gitforge
-
-# Scoop (Windows)
-scoop bucket add gitforge https://github.com/phantom1785322-hub/scoop-gitforge
-scoop install gitforge
-
-# Chocolatey (Windows)
-choco install gitforge
-
-# Arch Linux (AUR)
-yay -S gitforge
-
-# Nix
-nix profile install github:phantom1785322-hub/gitforge
-
-# Termux (Android)
-pkg install gitforge
-# or
-curl -fsSL https://gitforge.dev/install-termux.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ItzPhantomm/gitforge/master/install.sh | bash
 ```
 
 ### From Source
@@ -150,11 +121,6 @@ git clone https://github.com/phantom1785322-hub/gitforge
 cd gitforge
 make build
 # Binary at ./bin/gitforge
-```
-
-### Docker
-```bash
-docker run -it --rm -v $(pwd):/repo ghcr.io/phantom1785322-hub/gitforge:latest tui
 ```
 
 ### Verify Installation
@@ -571,11 +537,8 @@ GitForge stands on the shoulders of giants:
 
 ## Support
 
-- 📖 [Documentation](https://gitforge.dev/docs)
-- 💬 [Discord Community](https://discord.gg/gitforge)
 - 🐛 [Issue Tracker](https://github.com/phantom1785322-hub/gitforge/issues)
-- 💡 [Feature Requests](https://github.com/phantom1785322-hub/gitforge/discussions/categories/ideas)
-- 📧 [Email](mailto:hello@gitforge.dev)
+- 💡 [Discussions & Ideas](https://github.com/phantom1785322-hub/gitforge/discussions)
 
 ---
 
@@ -588,7 +551,5 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 <div align="center">
 
 **Made with ❤️ by the GitForge community**
-
-[Website](https://gitforge.dev) • [Twitter](https://twitter.com/gitforge) • [Mastodon](https://fosstodon.org/@gitforge)
 
 </div>

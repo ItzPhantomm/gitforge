@@ -22,27 +22,27 @@ type Repo struct {
 
 // OpenRepo opens an existing repository at the given path.
 func OpenRepo(path string) (*Repo, error) {
-	_, err := filepath.Abs(path)
+	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("absolute path: %w", err)
 	}
 
-	gitDir := filepath.Join(path, ".git")
-	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
-		if !isBareRepo(path) {
-			return nil, fmt.Errorf("not a git repository: %s", path)
-		}
+	root, err := FindRepoRoot(absPath)
+	if err == nil && root != "" {
+		return &Repo{
+			path:    root,
+			workdir: root,
+		}, nil
 	}
 
-	workdir := path
-	if !isBareRepo(path) {
-		workdir, _ = filepath.Abs(path)
+	if isBareRepo(absPath) {
+		return &Repo{
+			path:    absPath,
+			workdir: absPath,
+		}, nil
 	}
 
-	return &Repo{
-		path:    path,
-		workdir: workdir,
-	}, nil
+	return nil, fmt.Errorf("not a git repository (or any of the parent directories): %s", path)
 }
 
 // InitRepo initializes a new repository at the given path.
@@ -67,13 +67,6 @@ func InitRepo(path string, bare bool) (*Repo, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	repo.SetConfig("user.name", "GitForge User")
-	repo.SetConfig("user.email", "user@gitforge.local")
-	repo.SetConfig("init.defaultBranch", "main")
-	repo.SetConfig("push.autoSetupRemote", "true")
-	repo.SetConfig("core.autocrlf", "false")
-	repo.SetConfig("core.filemode", "true")
 
 	return repo, nil
 }
@@ -212,7 +205,7 @@ func (r *Repo) Branch() (string, error) {
 
 // Branches returns all local branches.
 func (r *Repo) Branches() ([]Branch, error) {
-	output, err := r.git("branch", "--format=%(refname:short)%(if:equals=*) %(upstream:track)%(then)%(upstream:short)%(end)")
+	output, err := r.git("branch", "--format=%(HEAD)|%(refname:short)|%(upstream:short)")
 	if err != nil {
 		return nil, err
 	}
@@ -225,13 +218,22 @@ func (r *Repo) Branches() ([]Branch, error) {
 			continue
 		}
 
-		parts := strings.SplitN(line, " ", 2)
-		branch := Branch{
-			Name: parts[0],
-		}
+		parts := strings.Split(line, "|")
+		isCurrent := len(parts) > 0 && parts[0] == "*"
+		name := ""
+		upstream := ""
 		if len(parts) > 1 {
-			branch.Upstream = parts[1]
-			branch.Tracking = true
+			name = parts[1]
+		}
+		if len(parts) > 2 {
+			upstream = parts[2]
+		}
+
+		branch := Branch{
+			Name:      name,
+			Upstream:  upstream,
+			Tracking:  upstream != "",
+			IsCurrent: isCurrent,
 		}
 		branches = append(branches, branch)
 	}
@@ -326,32 +328,39 @@ func (r *Repo) Status() (Status, error) {
 			parts := strings.SplitN(line, " ", 9)
 			if len(parts) >= 9 {
 				file := parts[8]
-				switch parts[1] {
-				case "A", "M", "D", "R", "C":
-					status.Staged = append(status.Staged, file)
+				xy := parts[1]
+				if len(xy) >= 2 {
+					if xy[0] != '.' {
+						status.Staged = append(status.Staged, file)
+					}
+					if xy[1] != '.' {
+						status.Unstaged = append(status.Unstaged, file)
+					}
 				}
 			}
 		} else if strings.HasPrefix(line, "2 ") {
 			parts := strings.SplitN(line, " ", 10)
 			if len(parts) >= 10 {
-				file := parts[9]
-				status.Staged = append(status.Staged, file)
+				pathPart := parts[9]
+				origAndNew := strings.Split(pathPart, "\t")
+				file := origAndNew[0]
+				xy := parts[1]
+				if len(xy) >= 2 {
+					if xy[0] != '.' {
+						status.Staged = append(status.Staged, file)
+					}
+					if xy[1] != '.' {
+						status.Unstaged = append(status.Unstaged, file)
+					}
+				}
 			}
-		} else if strings.HasPrefix(line, "?") {
+		} else if strings.HasPrefix(line, "? ") {
 			file := strings.TrimPrefix(line, "? ")
 			status.Untracked = append(status.Untracked, file)
 		} else if strings.HasPrefix(line, "u ") {
-			parts := strings.SplitN(line, " ", 3)
-			if len(parts) >= 3 {
-				status.Conflicted = append(status.Conflicted, parts[2])
-			}
-		} else if strings.HasPrefix(line, "1 ") && strings.Contains(line, " ") {
-			parts := strings.SplitN(line, " ", 9)
-			if len(parts) >= 9 {
-				file := parts[8]
-				if parts[2] != "." {
-					status.Unstaged = append(status.Unstaged, file)
-				}
+			parts := strings.SplitN(line, " ", 11)
+			if len(parts) >= 11 {
+				status.Conflicted = append(status.Conflicted, parts[10])
 			}
 		}
 	}
@@ -359,12 +368,20 @@ func (r *Repo) Status() (Status, error) {
 	return status, nil
 }
 
+// StatusRaw returns the raw status output from git.
+func (r *Repo) StatusRaw(porcelain bool) (string, error) {
+	if porcelain {
+		return r.git("status", "--porcelain")
+	}
+	return r.git("status")
+}
+
 // Status represents repository status.
 type Status struct {
-	Staged      []string
-	Unstaged    []string
-	Untracked   []string
-	Conflicted  []string
+	Staged     []string
+	Unstaged   []string
+	Untracked  []string
+	Conflicted []string
 }
 
 // IsClean returns true if the working directory is clean.
@@ -463,12 +480,16 @@ func (r *Repo) Log(opts *LogOptions) ([]Commit, error) {
 		}
 
 		timestamp, _ := strconv.ParseInt(parts[3], 10, 64)
+		body := ""
+		if len(parts) > 5 {
+			body = parts[5]
+		}
 		commit := Commit{
-			Hash:     parts[0],
-			Author:   Signature{Name: parts[1], Email: parts[2]},
-			Date:     time.Unix(timestamp, 0),
-			Subject:  parts[4],
-			Body:     parts[5],
+			Hash:    parts[0],
+			Author:  Signature{Name: parts[1], Email: parts[2]},
+			Date:    time.Unix(timestamp, 0),
+			Subject: parts[4],
+			Body:    body,
 		}
 		commits = append(commits, commit)
 	}
@@ -668,19 +689,19 @@ func (r *Repo) Remotes() ([]Remote, error) {
 			if !seen[name] {
 				remote := Remote{Name: name}
 				seen[name] = true
-				if strings.HasSuffix(direction, "(fetch)") {
-					remote.FetchURL = strings.TrimSuffix(url, " (fetch)")
-				} else if strings.HasSuffix(direction, "(push)") {
-					remote.PushURL = strings.TrimSuffix(url, " (push)")
+				if strings.Contains(direction, "fetch") {
+					remote.FetchURL = url
+				} else if strings.Contains(direction, "push") {
+					remote.PushURL = url
 				}
 				remotes = append(remotes, remote)
 			} else {
 				for i := range remotes {
 					if remotes[i].Name == name {
-						if strings.HasSuffix(direction, "(fetch)") {
-							remotes[i].FetchURL = strings.TrimSuffix(url, " (fetch)")
-						} else if strings.HasSuffix(direction, "(push)") {
-							remotes[i].PushURL = strings.TrimSuffix(url, " (push)")
+						if strings.Contains(direction, "fetch") {
+							remotes[i].FetchURL = url
+						} else if strings.Contains(direction, "push") {
+							remotes[i].PushURL = url
 						}
 						break
 					}
@@ -809,7 +830,7 @@ func (r *Repo) StashDrop(index int) error {
 
 // Config returns the repository config.
 func (r *Repo) Config() (*Config, error) {
-	output, err := r.git("config", "--list", "--show-origin")
+	output, err := r.git("config", "--list")
 	if err != nil {
 		return nil, err
 	}
@@ -817,19 +838,30 @@ func (r *Repo) Config() (*Config, error) {
 	cfg := &Config{Values: make(map[string]string)}
 	lines := strings.Split(output, "\n")
 	for _, line := range lines {
-		if strings.Contains(line, "\t") {
-			parts := strings.SplitN(line, "\t", 2)
-			if len(parts) == 2 {
-				cfg.Values[parts[0]] = parts[1]
-			}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
 		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			cfg.Values[parts[0]] = parts[1]
+		}
+	}
+	cfg.UserName = cfg.Values["user.name"]
+	cfg.UserEmail = cfg.Values["user.email"]
+	cfg.DefaultBranch = cfg.Values["init.defaultbranch"]
+	if cfg.DefaultBranch == "" {
+		cfg.DefaultBranch = cfg.Values["init.defaultBranch"]
 	}
 	return cfg, nil
 }
 
 // Config represents git configuration.
 type Config struct {
-	Values map[string]string
+	UserName      string
+	UserEmail     string
+	DefaultBranch string
+	Values        map[string]string
 }
 
 // GetConfig gets a config value.
@@ -915,7 +947,12 @@ type Tag struct {
 
 // CreateTag creates a new tag.
 func (r *Repo) CreateTag(name, commit, message string) error {
-	args := []string{"tag", "-a", name, "-m", message}
+	args := []string{"tag"}
+	if message != "" {
+		args = append(args, "-a", name, "-m", message)
+	} else {
+		args = append(args, name)
+	}
 	if commit != "" {
 		args = append(args, commit)
 	}
@@ -955,25 +992,12 @@ func IsRepo(path string) bool {
 	return cmd.Run() == nil
 }
 
-// Init initializes a new repository with default config.
+// Init initializes a new repository.
 func Init(path string) error {
 	cmd := exec.Command("git", "init", path)
 	if err := cmd.Run(); err != nil {
 		return err
 	}
-
-	repo, err := OpenRepo(path)
-	if err != nil {
-		return err
-	}
-
-	repo.SetConfig("user.name", "GitForge User")
-	repo.SetConfig("user.email", "user@gitforge.local")
-	repo.SetConfig("init.defaultBranch", "main")
-	repo.SetConfig("push.autoSetupRemote", "true")
-	repo.SetConfig("core.autocrlf", "false")
-	repo.SetConfig("core.filemode", "true")
-
 	return nil
 }
 
